@@ -1,0 +1,7 @@
+{
+  "name": "Placement Prep Path",
+  "description": "Comprehensive campus placement preparation portal for college students featuring company drives, aptitude & coding practice, interview resources, and application tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
