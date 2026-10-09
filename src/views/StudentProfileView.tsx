@@ -14,10 +14,20 @@ import {
   Cloud,
   HardDrive,
   Award,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const StudentProfileView: React.FC = () => {
-  const { currentUser, updateProfile, companies, isCloudConnected, addToast } = useApp();
+  const {
+    currentUser,
+    updateProfile,
+    companies,
+    isCloudConnected,
+    addToast,
+    supabaseUser,
+    signOutSupabase,
+  } = useApp();
 
   const [name, setName] = useState(currentUser.name);
   const [email, setEmail] = useState(currentUser.email);
@@ -108,6 +118,19 @@ export const StudentProfileView: React.FC = () => {
                 CGPA: <strong className="text-slate-900 font-mono">{currentUser.cgpa}</strong>
               </span>
             </div>
+            {supabaseUser && (
+              <div className="flex items-center gap-2 pt-1 text-[11px] text-emerald-700 font-medium">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Supabase Account: {supabaseUser.email}</span>
+                <button
+                  type="button"
+                  onClick={signOutSupabase}
+                  className="text-slate-400 hover:text-slate-700 underline text-[10px] ml-1"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

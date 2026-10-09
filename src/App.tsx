@@ -5,6 +5,7 @@ import { HeaderBar } from './components/HeaderBar';
 import { ToastContainer } from './components/ToastContainer';
 import { AuthModal } from './components/AuthModal';
 import { CompanyDetailModal } from './components/CompanyDetailModal';
+import { SupabaseModal } from './components/SupabaseModal';
 import { LandingPageView } from './views/LandingPageView';
 import { DashboardView } from './views/DashboardView';
 import { LearningPathsView } from './views/LearningPathsView';
@@ -18,10 +19,11 @@ import { AdminDashboardView } from './views/AdminDashboardView';
 import { MapPin, Mail, GraduationCap } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { companies } = useApp();
+  const { companies, refreshCloudData } = useApp();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'profile'>('signin');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
@@ -45,6 +47,7 @@ const MainLayout: React.FC = () => {
         onOpenAuth={handleOpenAuth}
         mobileOpen={mobileSidebarOpen}
         setMobileOpen={setMobileSidebarOpen}
+        onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -54,6 +57,7 @@ const MainLayout: React.FC = () => {
           setActiveTab={setActiveTab}
           onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           onOpenAuth={handleOpenAuth}
+          onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
         />
 
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
@@ -152,6 +156,13 @@ const MainLayout: React.FC = () => {
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         initialMode={authMode}
+        onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
+      />
+
+      <SupabaseModal
+        isOpen={supabaseModalOpen}
+        onClose={() => setSupabaseModalOpen(false)}
+        onRefreshCompleted={refreshCloudData}
       />
 
       <CompanyDetailModal

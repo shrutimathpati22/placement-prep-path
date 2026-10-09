@@ -37,6 +37,7 @@ interface SidebarProps {
   onOpenAuth: (mode: 'signin' | 'signup' | 'profile') => void;
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
+  onOpenSupabaseModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -45,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAuth,
   mobileOpen,
   setMobileOpen,
+  onOpenSupabaseModal,
 }) => {
   const { currentUser, switchUserRole, isCloudConnected, applications } = useApp();
 
@@ -185,7 +187,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Streak & Storage Status Pill */}
           <div className="px-3 pt-2">
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+            <div
+              onClick={onOpenSupabaseModal}
+              className={`p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2 ${
+                onOpenSupabaseModal ? 'cursor-pointer hover:border-slate-300 hover:bg-slate-100/60 transition-colors' : ''
+              }`}
+              title="Click to check Supabase backend tables & RLS status"
+            >
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-500 font-medium">Daily Streak</span>
                 <span className="font-bold text-amber-600 flex items-center gap-1 font-mono">
@@ -200,11 +208,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className={`font-semibold flex items-center gap-1 ${
                     isCloudConnected ? 'text-emerald-700' : 'text-slate-600'
                   }`}
-                  title={
-                    isCloudConnected
-                      ? 'Connected to Supabase cloud'
-                      : 'Running in local persistent storage mode. Connect Supabase in .env for remote sync.'
-                  }
                 >
                   {isCloudConnected ? (
                     <>

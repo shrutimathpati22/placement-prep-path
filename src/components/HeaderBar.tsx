@@ -9,6 +9,7 @@ import {
   ArrowRightLeft,
   Building,
   GraduationCap,
+  Database,
 } from 'lucide-react';
 
 interface HeaderBarProps {
@@ -16,6 +17,7 @@ interface HeaderBarProps {
   setActiveTab: (tab: NavTab) => void;
   onOpenMobileSidebar: () => void;
   onOpenAuth: (mode: 'signin' | 'signup' | 'profile') => void;
+  onOpenSupabaseModal?: () => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -23,6 +25,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   setActiveTab,
   onOpenMobileSidebar,
   onOpenAuth,
+  onOpenSupabaseModal,
 }) => {
   const { currentUser, switchUserRole, notices, readinessScore } = useApp();
 
@@ -115,6 +118,18 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <Sparkles className="w-3.5 h-3.5" />
             <span>{readinessScore}% Ready</span>
           </div>
+
+          {/* Supabase status / config button */}
+          {onOpenSupabaseModal && (
+            <button
+              onClick={onOpenSupabaseModal}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold hover:bg-emerald-100 transition-colors"
+              title="Supabase Database & RLS Settings"
+            >
+              <Database className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden sm:inline">Supabase</span>
+            </button>
+          )}
 
           {/* Role toggle button */}
           <button

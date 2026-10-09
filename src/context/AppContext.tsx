@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   UserProfile,
   Company,
@@ -21,7 +21,26 @@ import {
   initialQuizAttempts,
   recommendedActivities,
 } from '../data/mockData';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  supabase,
+  isSupabaseConfigured,
+  fetchProfileFromSupabase,
+  upsertProfileToSupabase,
+  fetchApplicationsFromSupabase,
+  upsertApplicationToSupabase,
+  deleteApplicationFromSupabase,
+  fetchQuizAttemptsFromSupabase,
+  insertQuizAttemptToSupabase,
+  fetchUserProgressFromSupabase,
+  upsertUserProgressToSupabase,
+  fetchCompaniesFromSupabase,
+  upsertCompanyToSupabase,
+  deleteCompanyFromSupabase,
+  fetchNoticesFromSupabase,
+  upsertNoticeToSupabase,
+  deleteNoticeFromSupabase,
+} from '../lib/supabase';
+import { User } from '@supabase/supabase-js';
 
 export interface ToastMessage {
   id: string;
@@ -32,10 +51,13 @@ export interface ToastMessage {
 
 interface AppContextType {
   currentUser: UserProfile;
+  supabaseUser: User | null;
   setCurrentUser: (user: UserProfile) => void;
   updateProfile: (updated: Partial<UserProfile>) => Promise<void>;
   switchUserRole: (role: 'student' | 'coordinator') => void;
+  signOutSupabase: () => Promise<void>;
   isCloudConnected: boolean;
+  refreshCloudData: () => Promise<void>;
 
   // Learning Paths
   learningPaths: LearningPath[];
@@ -103,6 +125,8 @@ const STORAGE_KEYS = {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
+
   const [currentUser, setCurrentUserState] = useState<UserProfile>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.USER);
@@ -195,7 +219,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Sync to local storage
+  // Local storage synchronization
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
@@ -256,20 +280,162 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {}
   }, [bookmarkedCompanies]);
 
-  const addToast = (toast: Omit<ToastMessage, 'id'>) => {
+  const addToast = useCallback((toast: Omit<ToastMessage, 'id'>) => {
     const id = 'toast-' + Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { ...toast, id }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Sync data from Supabase for a given user
+  const loadUserDataFromSupabase = useCallback(
+    async (user: User) => {
+      try {
+        // 1. Fetch Profile
+        const remoteProfile = await fetchProfileFromSupabase(user.id);
+        if (remoteProfile) {
+          setCurrentUserState(remoteProfile);
+        } else {
+          // If no profile row yet, create one from user auth metadata
+          const meta = user.user_metadata || {};
+          const fallbackProfile: UserProfile = {
+            id: user.id,
+            name: meta.name || user.email?.split('@')[0] || 'Student',
+            email: user.email || '',
+            rollNumber: meta.rollNumber || '',
+            college: meta.college || 'Apex Institute of Technology',
+            branch: meta.branch || 'Computer Science & Engineering',
+            yearOfStudy: meta.yearOfStudy || '3rd Year',
+            cgpa: meta.cgpa || 8.0,
+            graduationYear: meta.graduationYear || 2027,
+            role: meta.role || 'student',
+            targetCompanyTier: meta.targetCompanyTier || 'Super Dream',
+            phone: meta.phone || '',
+            activeBacklogs: meta.activeBacklogs || 0,
+            streakDays: 1,
+            completedLessonsCount: 0,
+            totalStudyHours: 0,
+          };
+          setCurrentUserState(fallbackProfile);
+          await upsertProfileToSupabase(fallbackProfile);
+        }
+
+        // 2. Fetch Applications
+        const remoteApps = await fetchApplicationsFromSupabase(user.id);
+        if (remoteApps.length > 0) {
+          setApplications(remoteApps);
+        }
+
+        // 3. Fetch Quiz Attempts
+        const remoteAttempts = await fetchQuizAttemptsFromSupabase(user.id);
+        if (remoteAttempts.length > 0) {
+          setQuizAttempts(remoteAttempts);
+        }
+
+        // 4. Fetch User Progress
+        const remoteProgress = await fetchUserProgressFromSupabase(user.id);
+        if (remoteProgress) {
+          if (remoteProgress.solvedAptitude.length > 0) {
+            setSolvedAptitude(remoteProgress.solvedAptitude);
+          }
+          if (remoteProgress.solvedCoding.length > 0) {
+            setSolvedCoding(remoteProgress.solvedCoding);
+          }
+          if (remoteProgress.bookmarkedCompanies.length > 0) {
+            setBookmarkedCompanies(remoteProgress.bookmarkedCompanies);
+          }
+        }
+      } catch (err) {
+        console.warn('[AppContext] loadUserDataFromSupabase error:', err);
+      }
+    },
+    []
+  );
+
+  // Sync public companies and notices from Supabase
+  const loadPublicDataFromSupabase = useCallback(async () => {
+    try {
+      const [remoteCompanies, remoteNotices] = await Promise.all([
+        fetchCompaniesFromSupabase(),
+        fetchNoticesFromSupabase(),
+      ]);
+
+      if (remoteCompanies.length > 0) {
+        setCompanies(remoteCompanies);
+      }
+      if (remoteNotices.length > 0) {
+        setNotices(remoteNotices);
+      }
+    } catch (err) {
+      console.warn('[AppContext] loadPublicDataFromSupabase error:', err);
+    }
+  }, []);
+
+  // Supabase Auth State Listener
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setSupabaseUser(session.user);
+        loadUserDataFromSupabase(session.user);
+      }
+    });
+
+    loadPublicDataFromSupabase();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setSupabaseUser(session.user);
+        await loadUserDataFromSupabase(session.user);
+      } else {
+        setSupabaseUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [loadUserDataFromSupabase, loadPublicDataFromSupabase]);
+
+  const refreshCloudData = async () => {
+    if (supabaseUser) {
+      await loadUserDataFromSupabase(supabaseUser);
+    }
+    await loadPublicDataFromSupabase();
+    addToast({
+      type: 'info',
+      title: 'Cloud Synced',
+      message: 'Latest updates refreshed from Supabase.',
+    });
   };
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const signOutSupabase = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setSupabaseUser(null);
+    setCurrentUserState(initialStudentUser);
+    addToast({
+      type: 'info',
+      title: 'Signed Out',
+      message: 'Switched back to local guest mode.',
+    });
   };
 
   const setCurrentUser = (user: UserProfile) => {
     setCurrentUserState(user);
+    if (isSupabaseConfigured && supabaseUser) {
+      upsertProfileToSupabase({ ...user, id: supabaseUser.id });
+    }
     addToast({
       type: 'success',
       title: 'Profile Updated',
@@ -282,19 +448,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUserState(next);
 
     if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('profiles').upsert({
-          id: next.id,
-          name: next.name,
-          college: next.college,
-          branch: next.branch,
-          year_of_study: next.yearOfStudy,
-          cgpa: next.cgpa,
-          updated_at: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.warn('Supabase sync skipped, updated locally:', err);
-      }
+      const targetId = supabaseUser ? supabaseUser.id : next.id;
+      await upsertProfileToSupabase({ ...next, id: targetId });
     }
 
     addToast({
@@ -324,6 +479,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Learning Paths: Toggle Lesson Complete
   const toggleLessonCompleted = (pathId: string, moduleId: string, lessonId: string) => {
+    let completedLessonIds: string[] = [];
     setLearningPaths((prev) =>
       prev.map((path) => {
         if (path.id !== pathId) return path;
@@ -355,10 +511,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
 
-    setCurrentUserState((prev) => ({
-      ...prev,
-      completedLessonsCount: prev.completedLessonsCount + 1,
-    }));
+    setCurrentUserState((prev) => {
+      const updatedUser = {
+        ...prev,
+        completedLessonsCount: prev.completedLessonsCount + 1,
+      };
+      if (isSupabaseConfigured && supabaseUser) {
+        upsertProfileToSupabase({ ...updatedUser, id: supabaseUser.id });
+      }
+      return updatedUser;
+    });
+
+    if (isSupabaseConfigured && supabaseUser) {
+      upsertUserProgressToSupabase(supabaseUser.id, {
+        completedLessons: [lessonId],
+      });
+    }
 
     addToast({
       type: 'success',
@@ -384,6 +552,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
 
+    if (isSupabaseConfigured && supabaseUser) {
+      upsertUserProgressToSupabase(supabaseUser.id, {
+        completedMilestones: [milestoneId],
+      });
+    }
+
     addToast({
       type: 'info',
       title: 'Milestone Updated',
@@ -399,19 +573,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setQuizAttempts((prev) => [newAttempt, ...prev]);
 
-    if (isSupabaseConfigured && supabase) {
-      try {
-        supabase.from('quiz_attempts').insert({
-          user_id: currentUser.id,
-          title: newAttempt.title,
-          category: newAttempt.category,
-          score: newAttempt.score,
-          total: newAttempt.totalQuestions,
-          passed: newAttempt.passed,
-        });
-      } catch (err) {
-        console.warn('Supabase attempt sync skipped:', err);
-      }
+    if (isSupabaseConfigured && supabaseUser) {
+      insertQuizAttemptToSupabase(newAttempt, supabaseUser.id);
     }
 
     addToast({
@@ -425,6 +588,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addCompany = (companyData: Omit<Company, 'id'>) => {
     const newComp: Company = { ...companyData, id: 'comp-' + Date.now().toString() };
     setCompanies((prev) => [newComp, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      upsertCompanyToSupabase(newComp);
+    }
+
     addToast({
       type: 'success',
       title: 'Drive Published',
@@ -433,23 +601,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateCompany = (id: string, updated: Partial<Company>) => {
-    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, ...updated } : c)));
+    setCompanies((prev) =>
+      prev.map((c) => {
+        if (c.id === id) {
+          const merged = { ...c, ...updated };
+          if (isSupabaseConfigured && supabase) {
+            upsertCompanyToSupabase(merged);
+          }
+          return merged;
+        }
+        return c;
+      })
+    );
     addToast({ type: 'success', title: 'Drive Updated' });
   };
 
   const deleteCompany = (id: string) => {
     setCompanies((prev) => prev.filter((c) => c.id !== id));
+    if (isSupabaseConfigured && supabase) {
+      deleteCompanyFromSupabase(id);
+    }
     addToast({ type: 'info', title: 'Drive Delisted' });
   };
 
   const addNotice = (noticeData: Omit<Notice, 'id'>) => {
     const newNotice: Notice = { ...noticeData, id: 'notice-' + Date.now().toString() };
     setNotices((prev) => [newNotice, ...prev]);
+    if (isSupabaseConfigured && supabase) {
+      upsertNoticeToSupabase(newNotice);
+    }
     addToast({ type: 'success', title: 'Notice Posted' });
   };
 
   const deleteNotice = (id: string) => {
     setNotices((prev) => prev.filter((n) => n.id !== id));
+    if (isSupabaseConfigured && supabase) {
+      deleteNoticeFromSupabase(id);
+    }
     addToast({ type: 'info', title: 'Notice Removed' });
   };
 
@@ -490,6 +678,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setApplications((prev) => [newApp, ...prev]);
+
+    if (isSupabaseConfigured && supabaseUser) {
+      upsertApplicationToSupabase(newApp, supabaseUser.id);
+    }
+
     addToast({
       type: 'success',
       title: 'Application Registered!',
@@ -500,48 +693,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateApplicationStage = (id: string, stage: ApplicationStage, notes?: string) => {
     setApplications((prev) =>
-      prev.map((app) => (app.id === id ? { ...app, stage, ...(notes ? { notes } : {}) } : app))
+      prev.map((app) => {
+        if (app.id === id) {
+          const updated = { ...app, stage, ...(notes ? { notes } : {}) };
+          if (isSupabaseConfigured && supabaseUser) {
+            upsertApplicationToSupabase(updated, supabaseUser.id);
+          }
+          return updated;
+        }
+        return app;
+      })
     );
     addToast({ type: 'success', title: `Moved to ${stage}` });
   };
 
   const updateApplication = (id: string, data: Partial<Application>) => {
-    setApplications((prev) => prev.map((app) => (app.id === id ? { ...app, ...data } : app)));
+    setApplications((prev) =>
+      prev.map((app) => {
+        if (app.id === id) {
+          const updated = { ...app, ...data };
+          if (isSupabaseConfigured && supabaseUser) {
+            upsertApplicationToSupabase(updated, supabaseUser.id);
+          }
+          return updated;
+        }
+        return app;
+      })
+    );
     addToast({ type: 'success', title: 'Application Updated' });
   };
 
   const deleteApplication = (id: string) => {
     setApplications((prev) => prev.filter((a) => a.id !== id));
+    if (isSupabaseConfigured && supabaseUser) {
+      deleteApplicationFromSupabase(id);
+    }
     addToast({ type: 'info', title: 'Application Removed' });
   };
 
   const addManualApplication = (appData: Omit<Application, 'id'>) => {
     const newApp: Application = { ...appData, id: 'app-' + Date.now().toString() };
     setApplications((prev) => [newApp, ...prev]);
+    if (isSupabaseConfigured && supabaseUser) {
+      upsertApplicationToSupabase(newApp, supabaseUser.id);
+    }
     addToast({ type: 'success', title: 'Application Logged' });
   };
 
   const markAptitudeSolved = (id: string) => {
     if (!solvedAptitude.includes(id)) {
-      setSolvedAptitude((prev) => [...prev, id]);
+      const updated = [...solvedAptitude, id];
+      setSolvedAptitude(updated);
+      if (isSupabaseConfigured && supabaseUser) {
+        upsertUserProgressToSupabase(supabaseUser.id, { solvedAptitude: updated });
+      }
       addToast({ type: 'success', title: 'Aptitude Question Solved!' });
     }
   };
 
   const markCodingSolved = (id: string) => {
     if (!solvedCoding.includes(id)) {
-      setSolvedCoding((prev) => [...prev, id]);
+      const updated = [...solvedCoding, id];
+      setSolvedCoding(updated);
+      if (isSupabaseConfigured && supabaseUser) {
+        upsertUserProgressToSupabase(supabaseUser.id, { solvedCoding: updated });
+      }
       addToast({ type: 'success', title: 'Coding Question Solved!' });
     }
   };
 
   const toggleBookmarkCompany = (id: string) => {
+    let updated: string[];
     if (bookmarkedCompanies.includes(id)) {
-      setBookmarkedCompanies((prev) => prev.filter((item) => item !== id));
+      updated = bookmarkedCompanies.filter((item) => item !== id);
+      setBookmarkedCompanies(updated);
       addToast({ type: 'info', title: 'Bookmark Removed' });
     } else {
-      setBookmarkedCompanies((prev) => [...prev, id]);
+      updated = [...bookmarkedCompanies, id];
+      setBookmarkedCompanies(updated);
       addToast({ type: 'success', title: 'Bookmarked Company' });
+    }
+    if (isSupabaseConfigured && supabaseUser) {
+      upsertUserProgressToSupabase(supabaseUser.id, { bookmarkedCompanies: updated });
     }
   };
 
@@ -566,10 +799,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         currentUser,
+        supabaseUser,
         setCurrentUser,
         updateProfile,
         switchUserRole,
+        signOutSupabase,
         isCloudConnected: isSupabaseConfigured,
+        refreshCloudData,
         learningPaths,
         toggleLessonCompleted,
         roadmap,
